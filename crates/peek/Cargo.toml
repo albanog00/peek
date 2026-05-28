@@ -3,5 +3,10 @@ name = "peek"
 version.workspace = true
 edition = "2024"
 
-[dependencies] 
-iced = "0.14.0"
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", features = ["wayland", "x11"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["wayland", "x11", "font-kit"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "a976b2caec0d4abafa88fb2ce7636cf58c2af700" }
+# Optional, for default bundled assets
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+anyhow = "1.0"

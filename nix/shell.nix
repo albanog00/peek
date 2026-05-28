@@ -12,10 +12,9 @@ in
 
     nativeBuildInputs = [];
 
-    packages = peekPkgs.buildInputs;
-
     env = {
       RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
+      RUST_BACKTRACE = "1";
       LD_LIBRARY_PATH = "${lib.makeLibraryPath (map (input: input.out) peekPkgs.buildInputs)}:$LD_LIBRARY_PATH";
     };
   }

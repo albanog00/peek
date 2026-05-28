@@ -3,7 +3,9 @@
   stdenv,
   craneLib,
   pkg-config,
+  makeWrapper,
   # GPU backend
+  vulkan-headers,
   vulkan-loader,
   libGL,
   # Window system
@@ -13,25 +15,44 @@
   libXcursor,
   libXi,
   libXrandr,
+  # Text
+  fontconfig,
+  freetype,
+  atk,
+  gio-sharp,
+  glib,
+  gtk3,
 }: let
   pname = "peek";
   version = "0.1.0";
 
   nativeBuildInputs = [
     pkg-config
+    makeWrapper
   ];
 
   buildInputs =
-    []
+    [
+      fontconfig
+      freetype
+    ]
     ++ lib.optionals stdenv.isLinux [
       vulkan-loader
+      vulkan-headers
       libGL
+
       libxkbcommon
       wayland
+
       libX11
       libXcursor
       libXi
       libXrandr
+
+      gio-sharp
+      gtk3
+      glib
+      atk
     ];
 
   commonArgs = {
@@ -71,7 +92,7 @@ in
       inherit cargoArtifacts;
 
       buildPhaseCargoCommand = ''
-        cargo build --release --offline --frozen --package peek
+        cargo build --release --frozen --package peek
       '';
 
       meta = {
