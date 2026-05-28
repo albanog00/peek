@@ -22,6 +22,7 @@
   gio-sharp,
   glib,
   gtk3,
+  fd,
 }: let
   pname = "peek";
   version = "0.1.0";
@@ -55,7 +56,7 @@
       atk
     ];
 
-  commonArgs = {
+  baseArgs = {
     inherit
       pname
       version
@@ -84,7 +85,43 @@
       };
   };
 
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  rawCargoVendorDir = craneLib.vendorCargoDeps baseArgs;
+  patchedCargoVendorDir = stdenv.mkDerivation {
+    name = "${pname}-cargo-vendor";
+    buildCommand = ''
+      mkdir -p "$out"
+      cp -aL ${rawCargoVendorDir}/. "$out"/
+      chmod -R u+rwX "$out"
+
+      # gpui-component expects the upstream repo layout: `../assets/assets/icons`.
+      # Cargo/Crane vendors the assets crate as `gpui-component-assets-*`, so add
+      # the sibling `assets` name the proc macro expects.
+
+      root="$(${lib.getExe fd} "^gpui-component-[0-9].*" "$out" -t d | head -n1)"
+      assets="$(${lib.getExe fd} "^gpui-component-assets-[0-9].*" "$out" -t d | head -n1)"
+      root="$(dirname "$root")"
+
+      ln -s "$assets" "$root/assets"
+
+      substituteInPlace "$out/config.toml" \
+      --replace-fail '${rawCargoVendorDir}' "$out"
+
+      test -L "$root/assets"
+      test -d "$root/assets/assets/icons"
+    '';
+  };
+
+  commonArgs =
+    baseArgs
+    // {
+      cargoVendorDir = patchedCargoVendorDir;
+    };
+
+  cargoArtifacts =
+    craneLib.buildDepsOnly commonArgs
+    // {
+      cargoExtraArgs = "--locked";
+    };
 in
   craneLib.mkCargoDerivation (
     commonArgs

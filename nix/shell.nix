@@ -10,7 +10,7 @@ in
     name = "peek-dev";
     inputsFrom = [peekPkgs];
 
-    nativeBuildInputs = [];
+    nativeBuildInputs = peekPkgs.nativeBuildInputs;
 
     env = {
       RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
