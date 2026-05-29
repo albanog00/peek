@@ -3,7 +3,6 @@
   stdenv,
   craneLib,
   pkg-config,
-  makeWrapper,
   # GPU backend
   vulkan-headers,
   vulkan-loader,
@@ -23,14 +22,18 @@
   glib,
   gtk3,
   fd,
+  wrapGAppsHook3,
 }: let
   pname = "peek";
   version = "0.1.0";
 
-  nativeBuildInputs = [
-    pkg-config
-    makeWrapper
-  ];
+  nativeBuildInputs =
+    [
+      pkg-config
+    ]
+    ++ lib.optionals stdenv.isLinux [
+      wrapGAppsHook3
+    ];
 
   buildInputs =
     [
@@ -117,11 +120,10 @@
       cargoVendorDir = patchedCargoVendorDir;
     };
 
-  cargoArtifacts =
-    craneLib.buildDepsOnly commonArgs
+  cargoArtifacts = craneLib.buildDepsOnly (commonArgs
     // {
       cargoExtraArgs = "--locked";
-    };
+    });
 in
   craneLib.mkCargoDerivation (
     commonArgs
@@ -130,6 +132,30 @@ in
 
       buildPhaseCargoCommand = ''
         cargo build --release --frozen --package peek
+      '';
+
+      installPhaseCommand = ''
+        mkdir -p $out/bin
+        cp target/release/${pname} $out/bin/${pname}
+      '';
+
+      preFixup = lib.optionalString stdenv.isLinux ''
+        gappsWrapperArgs+=(
+          --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath (
+          map (input: input.out) [
+            vulkan-loader
+            libGL
+
+            libxkbcommon
+            wayland
+
+            libX11
+            libXcursor
+            libXi
+            libXrandr
+          ]
+        )}
+        )
       '';
 
       meta = {
