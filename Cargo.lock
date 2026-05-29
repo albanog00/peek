@@ -4423,6 +4423,8 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
