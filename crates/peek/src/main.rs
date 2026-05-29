@@ -1,84 +1,74 @@
-use gpui::{
-    AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, TitlebarOptions,
-    Window, WindowOptions, div,
-};
-use gpui_component::{
-    Root, StyledExt,
-    button::{Button, ButtonVariants},
-};
+use gpui::*;
+use gpui_component::*;
 
-pub struct Counter {
-    value: u64,
+mod components;
+mod utils;
+
+use components::image_viewer::ImageViewer;
+
+use crate::utils::fs::load_image_from_path;
+
+pub struct MainContent {
+    viewer: Entity<ImageViewer>,
 }
 
-impl Counter {
-    pub fn new() -> Self {
-        Self { value: 0 }
-    }
-}
-
-impl Render for Counter {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .v_flex()
-            .gap_2()
-            .items_center()
-            .justify_center()
-            .child(format!("{}", self.value))
-            .child(
-                Button::new("increment")
-                    .primary()
-                    .label("Increment")
-                    .on_click(cx.listener(|this, _, _, _| this.value += 1)),
-            )
-    }
-}
-
-pub struct HelloWorld {
-    counter: Entity<Counter>,
-}
-
-impl HelloWorld {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+impl MainContent {
+    pub fn new(cx: &mut Context<Self>, image: Option<Image>) -> Self {
         Self {
-            counter: cx.new(|_| Counter::new()),
+            viewer: cx.new(|cx| ImageViewer::new(cx, image)),
         }
     }
 }
 
-impl Render for HelloWorld {
-    fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+impl Render for MainContent {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors;
         div()
-            .v_flex()
-            .gap_2()
+            .bg(colors.background)
             .size_full()
-            .items_center()
-            .justify_center()
-            .child(self.counter.clone())
+            .p_2()
+            .child(self.viewer.clone())
     }
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    tracing_subscriber::fmt().init();
 
-    app.run(move |cx| {
-        gpui_component::init(cx);
+    let args = std::env::args().collect::<Vec<_>>();
+    let input_provided_image = args.get(1).and_then(load_image_from_path);
 
-        let window_opts = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Peek | Image viewer".into()),
+    gpui_platform::application()
+        .with_assets(gpui_component_assets::Assets)
+        .run(move |cx| {
+            gpui_component::init(cx);
+
+            let window_opts = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Peek | Image viewer".into()),
+                    ..Default::default()
+                }),
+                window_bounds: Some(WindowBounds::Windowed(bounds(
+                    point(px(0.0), px(0.0)),
+                    size(px(1024.0), px(768.0)),
+                ))),
+                window_min_size: Some(size(px(250.0), px(250.0))),
+                kind: WindowKind::Normal,
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_opts, |window, cx| {
-                let view = cx.new(|cx| HelloWorld::new(cx));
-                cx.new(|cx| Root::new(view, window, cx))
+            cx.spawn(async move |cx| {
+                cx.open_window(window_opts, |window, cx| {
+                    window
+                        .observe_window_appearance(|window, cx| {
+                            theme::Theme::sync_system_appearance(Some(window), cx);
+                        })
+                        .detach();
+
+                    let view = cx.new(|cx| MainContent::new(cx, input_provided_image));
+                    cx.new(|cx| Root::new(view, window, cx))
+                })
+                .expect("Failed to open window");
             })
-            .expect("Failed to open window");
-        })
-        .detach();
-    });
+            .detach();
+        });
 }
