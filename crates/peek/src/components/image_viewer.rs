@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::*;
 use gpui_component::{ActiveTheme, IconName, Sizable, Size as ComponentSize, spinner::Spinner};
 
-use crate::utils::ui::{image_size, scale_size};
+use crate::utils::ui::{viewport_image_size, scale_size};
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 32.0;
@@ -21,6 +21,9 @@ struct ImageViewerState {
     viewport_size: Size<Pixels>,
     image_size: Size<Pixels>,
     fitted_once: bool,
+    is_dragging: bool,
+    drag_start_mouse: Option<Point<Pixels>>,
+    drag_start_pan: Point<Pixels>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +41,9 @@ impl ImageViewerState {
             viewport_size: size(px(0.0), px(0.0)),
             image_size: size(px(0.0), px(0.0)),
             fitted_once: false,
+            is_dragging: false,
+            drag_start_mouse: None,
+            drag_start_pan: point(px(0.0), px(0.0)),
         }
     }
 
@@ -77,6 +83,12 @@ impl ImageViewerState {
 
     fn fit_to_viewport(&mut self) {
         self.fit(self.viewport_size, self.image_size);
+    }
+
+    fn start_drag_at(&mut self, position: &Point<Pixels>) {
+        self.is_dragging = true;
+        self.drag_start_mouse = Some(*position);
+        self.drag_start_pan = self.pan;
     }
 
     fn pan_by(&mut self, delta: Point<Pixels>) {
@@ -141,20 +153,60 @@ impl Render for ImageViewer {
                 .child(div().child("Loading image..."));
         };
 
+        let cursor = if self.state.read(cx).is_dragging {
+            CursorStyle::ClosedHand
+        } else {
+            CursorStyle::OpenHand
+        };
+
         div()
+            .cursor(cursor)
             .relative()
             .size_full()
             .rounded_sm()
             .overflow_hidden()
             .on_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                if event.button != MouseButton::Left || event.click_count < 2 {
-                    return;
-                }
-
-                this.state.update(cx, |state, cx| {
-                    state.fit_to_viewport();
-                    cx.notify();
+                this.state.update(cx, |state, cx| match event.button {
+                    MouseButton::Left => {
+                        if event.click_count == 2 {
+                            state.fit_to_viewport();
+                            cx.notify();
+                        } else if !state.is_dragging {
+                            state.start_drag_at(&event.position);
+                            cx.notify();
+                        }
+                    }
+                    MouseButton::Right => {}
+                    MouseButton::Middle => {}
+                    MouseButton::Navigate(_direction) => {}
                 });
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.state.update(cx, |state, cx| {
+                        if state.is_dragging {
+                            state.is_dragging = false;
+                        }
+
+                        state.drag_start_mouse = None;
+                        cx.notify();
+                    });
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.state.update(cx, |state, cx| {
+                    if event.dragging()
+                        && event.pressed_button.is_some_and(|b| b == MouseButton::Left)
+                    {
+                        let Some(drag_start_mouse) = state.drag_start_mouse else {
+                            return;
+                        };
+
+                        state.pan = state.drag_start_pan + (event.position - drag_start_mouse);
+                        cx.notify();
+                    }
+                })
             }))
             .on_pinch(cx.listener(|this, event: &PinchEvent, _window, cx| {
                 let factor = (1.0 + event.delta).max(0.01);
@@ -170,13 +222,8 @@ impl Render for ImageViewer {
                 };
 
                 this.state.update(cx, |state, cx| {
-                    if event.control {
-                        let factor = (-delta.y.as_f32() * 0.0015).exp();
-                        state.zoom_around(event.position, factor);
-                    } else {
-                        state.pan_by(point(-delta.x, -delta.y));
-                    }
-
+                    let factor = (delta.y.as_f32() * 0.0015).exp();
+                    state.zoom_around(event.position, factor);
                     cx.notify();
                 });
             }))
@@ -186,7 +233,7 @@ impl Render for ImageViewer {
                         let state = state.clone();
                         let image_render = image_render.clone();
                         move |bounds, window, cx| {
-                            let image_size = image_size(&image_render, window);
+                            let image_size = viewport_image_size(&image_render, window);
 
                             state.update(cx, |state, _cx| {
                                 state.update_viewport(bounds, image_size);
@@ -195,7 +242,7 @@ impl Render for ImageViewer {
                         }
                     },
                     move |bounds, snapshot, window, _cx| {
-                        let image_size = image_size(&image_render, window);
+                        let image_size = viewport_image_size(&image_render, window);
                         let image_bounds = gpui::bounds(
                             bounds.origin + snapshot.pan,
                             scale_size(image_size, snapshot.zoom),
@@ -222,7 +269,9 @@ impl Render for ImageViewer {
                     .px(px(8.0))
                     .py(px(4.0))
                     .rounded_sm()
-                    .bg(colors.background.alpha(0.65))
+                    .bg(colors.secondary.alpha(0.65))
+                    .border_1()
+                    .border_color(colors.border)
                     .text_color(colors.primary)
                     .text_xs()
                     .child(zoom_label),

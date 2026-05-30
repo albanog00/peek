@@ -1,6 +1,6 @@
 use gpui::*;
 
-pub fn image_size(image: &RenderImage, window: &Window) -> Size<Pixels> {
+pub fn viewport_image_size(image: &RenderImage, window: &Window) -> Size<Pixels> {
     image
         .size(0)
         .map(|value| px(value.0 as f32 / window.scale_factor()))
