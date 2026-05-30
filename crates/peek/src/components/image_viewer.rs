@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::*;
 use gpui_component::{ActiveTheme, IconName, Sizable, Size as ComponentSize, spinner::Spinner};
 
-use crate::utils::ui::{viewport_image_size, scale_size};
+use crate::utils::ui::{scale_size, viewport_image_size};
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 32.0;
@@ -106,6 +106,13 @@ impl ImageViewerState {
 
         let ratio = self.zoom / old_zoom;
         self.pan = position - (position - self.pan) * ratio;
+    }
+
+    fn reanchor_drag(&mut self, position: Point<Pixels>) {
+        if self.is_dragging {
+            self.drag_start_mouse = Some(position);
+            self.drag_start_pan = self.pan;
+        }
     }
 
     fn snapshot(&self) -> ViewportSnapshot {
@@ -212,6 +219,7 @@ impl Render for ImageViewer {
                 let factor = (1.0 + event.delta).max(0.01);
                 this.state.update(cx, |state, cx| {
                     state.zoom_around(event.position, factor);
+                    state.reanchor_drag(event.position);
                     cx.notify();
                 });
             }))
@@ -224,6 +232,7 @@ impl Render for ImageViewer {
                 this.state.update(cx, |state, cx| {
                     let factor = (delta.y.as_f32() * 0.0015).exp();
                     state.zoom_around(event.position, factor);
+                    state.reanchor_drag(event.position);
                     cx.notify();
                 });
             }))
