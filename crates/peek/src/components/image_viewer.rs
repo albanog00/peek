@@ -51,21 +51,11 @@ impl ImageViewerState {
         self.viewport_origin = bounds.origin;
         self.viewport_size = bounds.size;
         self.image_size = image_size;
-        self.fit_once(bounds.size, image_size);
     }
 
-    fn fit_once(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) {
-        if self.fitted_once {
-            return;
-        }
-
-        self.fit(viewport_size, image_size);
-        self.fitted_once = true;
-    }
-
-    fn fit(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) {
+    fn fit(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) -> bool {
         if image_size.width.as_f32() == 0.0 || image_size.height.as_f32() == 0.0 {
-            return;
+            return false;
         }
 
         let fit_zoom = (viewport_size.width.as_f32() / image_size.width.as_f32())
@@ -79,10 +69,24 @@ impl ImageViewerState {
             (viewport_size.width - scaled_size.width) / 2.0,
             (viewport_size.height - scaled_size.height) / 2.0,
         );
+        true
     }
 
-    fn fit_to_viewport(&mut self) {
-        self.fit(self.viewport_size, self.image_size);
+    fn fit_once(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) -> bool {
+        if self.fitted_once {
+            return false;
+        }
+
+        self.fitted_once = self.fit(viewport_size, image_size);
+        self.fitted_once
+    }
+
+    fn fit_once_to_viewport(&mut self) -> bool {
+        self.fit_once(self.viewport_size, self.image_size)
+    }
+
+    fn fit_to_viewport(&mut self) -> bool {
+        self.fit(self.viewport_size, self.image_size)
     }
 
     fn start_drag_at(&mut self, position: &Point<Pixels>) {
@@ -175,8 +179,7 @@ impl Render for ImageViewer {
             .on_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                 this.state.update(cx, |state, cx| match event.button {
                     MouseButton::Left => {
-                        if event.click_count == 2 {
-                            state.fit_to_viewport();
+                        if event.click_count == 2 && state.fit_to_viewport() {
                             cx.notify();
                         } else if !state.is_dragging {
                             state.start_drag_at(&event.position);
@@ -241,11 +244,16 @@ impl Render for ImageViewer {
                     {
                         let state = state.clone();
                         let image_render = image_render.clone();
-                        move |bounds, window, cx| {
+                        move |bounds, window, app| {
                             let image_size = viewport_image_size(&image_render, window);
 
-                            state.update(cx, |state, _cx| {
+                            state.update(app, |state, cx| {
                                 state.update_viewport(bounds, image_size);
+                                if state.fit_once_to_viewport() {
+                                    cx.on_next_frame(window, move |_, _, cx| {
+                                        cx.notify();
+                                    });
+                                }
                                 state.snapshot()
                             })
                         }
