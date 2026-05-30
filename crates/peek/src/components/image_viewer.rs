@@ -95,6 +95,15 @@ impl ImageViewerState {
         self.drag_start_pan = self.pan;
     }
 
+    fn stop_drag(&mut self) -> bool {
+        let was_dragging = self.is_dragging;
+
+        self.is_dragging = false;
+        self.drag_start_mouse = None;
+
+        was_dragging
+    }
+
     fn pan_by(&mut self, delta: Point<Pixels>) {
         self.pan += delta;
     }
@@ -191,31 +200,41 @@ impl Render for ImageViewer {
                     MouseButton::Navigate(_direction) => {}
                 });
             }))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.state.update(cx, |state, cx| {
+                        if state.stop_drag() {
+                            cx.notify();
+                        }
+                    });
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.state.update(cx, |state, cx| {
-                        if state.is_dragging {
-                            state.is_dragging = false;
+                        if state.stop_drag() {
+                            cx.notify();
                         }
-
-                        state.drag_start_mouse = None;
-                        cx.notify();
                     });
                 }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 this.state.update(cx, |state, cx| {
-                    if event.dragging()
-                        && event.pressed_button.is_some_and(|b| b == MouseButton::Left)
-                    {
-                        let Some(drag_start_mouse) = state.drag_start_mouse else {
-                            return;
-                        };
-
-                        state.pan = state.drag_start_pan + (event.position - drag_start_mouse);
-                        cx.notify();
+                    if !event.dragging() || event.pressed_button != Some(MouseButton::Left) {
+                        if state.stop_drag() {
+                            cx.notify();
+                        }
+                        return;
                     }
+
+                    let Some(drag_start_mouse) = state.drag_start_mouse else {
+                        return;
+                    };
+
+                    state.pan = state.drag_start_pan + (event.position - drag_start_mouse);
+                    cx.notify();
                 })
             }))
             .on_pinch(cx.listener(|this, event: &PinchEvent, _window, cx| {
