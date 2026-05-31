@@ -12,3 +12,7 @@ pub fn scale_size(size: Size<Pixels>, factor: f32) -> Size<Pixels> {
         px(size.height.as_f32() * factor),
     )
 }
+
+pub fn size_is_zero(size: Size<Pixels>) -> bool {
+    size.width.as_f32() <= 0.0 || size.height.as_f32() <= 0.0
+}

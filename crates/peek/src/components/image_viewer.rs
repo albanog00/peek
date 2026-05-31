@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{ActiveTheme, IconName, Sizable, Size as ComponentSize, spinner::Spinner};
 
-use crate::utils::ui::{scale_size, viewport_image_size};
+use crate::utils::ui::{scale_size, size_is_zero, viewport_image_size};
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 32.0;
+const DOUBLE_CLICK_ZOOM_FACTOR: f32 = 4.0;
 
 pub struct ImageViewer {
     state: Entity<ImageViewerState>,
@@ -20,7 +21,7 @@ struct ImageViewerState {
     viewport_origin: Point<Pixels>,
     viewport_size: Size<Pixels>,
     image_size: Size<Pixels>,
-    fitted_once: bool,
+    has_initial_fit: bool,
     is_dragging: bool,
     drag_start_mouse: Option<Point<Pixels>>,
     drag_start_pan: Point<Pixels>,
@@ -40,21 +41,21 @@ impl ImageViewerState {
             viewport_origin: point(px(0.0), px(0.0)),
             viewport_size: size(px(0.0), px(0.0)),
             image_size: size(px(0.0), px(0.0)),
-            fitted_once: false,
+            has_initial_fit: false,
             is_dragging: false,
             drag_start_mouse: None,
             drag_start_pan: point(px(0.0), px(0.0)),
         }
     }
 
-    fn update_viewport(&mut self, bounds: Bounds<Pixels>, image_size: Size<Pixels>) {
+    fn set_viewport_metrics(&mut self, bounds: Bounds<Pixels>, image_size: Size<Pixels>) {
         self.viewport_origin = bounds.origin;
         self.viewport_size = bounds.size;
         self.image_size = image_size;
     }
 
     fn fit(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) -> bool {
-        if image_size.width.as_f32() == 0.0 || image_size.height.as_f32() == 0.0 {
+        if size_is_zero(viewport_size) || size_is_zero(image_size) {
             return false;
         }
 
@@ -72,29 +73,23 @@ impl ImageViewerState {
         true
     }
 
-    fn fit_once(&mut self, viewport_size: Size<Pixels>, image_size: Size<Pixels>) -> bool {
-        if self.fitted_once {
+    fn fit_to_viewport(&mut self) -> bool {
+        let fitted = self.fit(self.viewport_size, self.image_size);
+        self.has_initial_fit |= fitted;
+        fitted
+    }
+
+    fn is_viewport_fit(&self) -> bool {
+        if size_is_zero(self.viewport_size) || size_is_zero(self.image_size) {
             return false;
         }
 
-        self.fitted_once = self.fit(viewport_size, image_size);
-        self.fitted_once
-    }
-
-    fn fit_once_to_viewport(&mut self) -> bool {
-        self.fit_once(self.viewport_size, self.image_size)
-    }
-
-    fn fit_to_viewport(&mut self) -> bool {
-        self.fit(self.viewport_size, self.image_size)
-    }
-
-    fn is_viewport_fit(&mut self) -> bool {
         let fit_zoom = (self.viewport_size.width.as_f32() / self.image_size.width.as_f32())
             .min(self.viewport_size.height.as_f32() / self.image_size.height.as_f32())
             .min(1.0)
             .clamp(MIN_ZOOM, MAX_ZOOM);
-        fit_zoom == self.zoom
+
+        (fit_zoom - self.zoom).abs() < 0.001
     }
 
     fn start_drag_at(&mut self, position: &Point<Pixels>) {
@@ -104,16 +99,13 @@ impl ImageViewerState {
     }
 
     fn stop_drag(&mut self) -> bool {
-        let was_dragging = self.is_dragging;
+        if !self.is_dragging {
+            return false;
+        }
 
         self.is_dragging = false;
         self.drag_start_mouse = None;
-
-        was_dragging
-    }
-
-    fn pan_by(&mut self, delta: Point<Pixels>) {
-        self.pan += delta;
+        true
     }
 
     fn zoom_around(&mut self, window_position: Point<Pixels>, factor: f32) {
@@ -142,30 +134,146 @@ impl ImageViewerState {
             pan: self.pan,
         }
     }
+
+    fn handle_double_click(&mut self, position: Point<Pixels>) {
+        self.stop_drag();
+        if self.is_viewport_fit() {
+            self.zoom_around(position, DOUBLE_CLICK_ZOOM_FACTOR);
+        } else {
+            self.fit_to_viewport();
+        }
+    }
+
+    fn zoom_label(&self) -> Option<SharedString> {
+        self.has_initial_fit
+            .then(|| format!("{:.0}%", self.zoom * 100.0).into())
+    }
 }
 
 impl ImageViewer {
     pub fn new(cx: &mut Context<Self>, image: Option<Image>) -> Self {
         Self {
             state: cx.new(|_| ImageViewerState::new()),
-            image: image.and_then(|image| Some(Arc::new(image))).or(None),
+            image: image.map(Arc::new),
         }
+    }
+
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.state.update(cx, |state, cx| match event.button {
+            MouseButton::Left => {
+                if event.click_count % 2 == 0 {
+                    state.handle_double_click(event.position);
+                    cx.notify();
+                } else if !state.is_dragging {
+                    state.start_drag_at(&event.position);
+                    cx.notify();
+                }
+            }
+            MouseButton::Right => {}
+            MouseButton::Middle => {}
+            MouseButton::Navigate(_direction) => {}
+        });
+    }
+
+    fn on_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.state.update(cx, |state, cx| {
+            if state.stop_drag() {
+                cx.notify();
+            }
+        });
+    }
+
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.state.update(cx, |state, cx| {
+            if !event.dragging() || event.pressed_button != Some(MouseButton::Left) {
+                if state.stop_drag() {
+                    cx.notify();
+                }
+                return;
+            }
+
+            let Some(drag_start_mouse) = state.drag_start_mouse else {
+                return;
+            };
+
+            state.pan = state.drag_start_pan + (event.position - drag_start_mouse);
+            cx.notify();
+        })
+    }
+
+    fn on_pinch(&mut self, event: &PinchEvent, _window: &mut Window, cx: &mut Context<'_, Self>) {
+        let factor = (1.0 + event.delta).max(0.01);
+        self.state.update(cx, |state, cx| {
+            state.zoom_around(event.position, factor);
+            state.reanchor_drag(event.position);
+            cx.notify();
+        });
+    }
+
+    fn on_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let delta = match event.delta {
+            ScrollDelta::Pixels(delta) => delta,
+            ScrollDelta::Lines(delta) => point(px(delta.x * 16.0), px(delta.y * 16.0)),
+        };
+
+        self.state.update(cx, |state, cx| {
+            let factor = (delta.y.as_f32() * 0.0015).exp();
+            state.zoom_around(event.position, factor);
+            state.reanchor_drag(event.position);
+            cx.notify();
+        });
     }
 }
 
 impl Render for ImageViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
-        let zoom_label = format!("{:.0}%", self.state.read(cx).zoom * 100.0);
+        let zoom_label = state.read(cx).zoom_label();
         let colors = cx.theme().colors;
 
-        let Some(image) = &self.image else {
-            return div().size_full();
+        let container = div()
+            .size_full()
+            .relative()
+            .border_2()
+            .border_color(colors.border)
+            .rounded_sm()
+            .overflow_hidden();
+
+        let Some(image) = self.image.clone() else {
+            // No Image provided
+            return container
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_color(colors.muted_foreground)
+                .child("Drop an image here!");
         };
 
-        let Some(image_render) = image.clone().use_render_image(window, cx) else {
-            return div()
-                .size_full()
+        let Some(image_render) = image.use_render_image(window, cx) else {
+            // Image is loading
+            return container
                 .flex()
                 .flex_col()
                 .items_center()
@@ -187,90 +295,14 @@ impl Render for ImageViewer {
             CursorStyle::OpenHand
         };
 
-        div()
+        container
             .cursor(cursor)
-            .relative()
-            .size_full()
-            .rounded_sm()
-            .overflow_hidden()
-            .on_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                this.state.update(cx, |state, cx| match event.button {
-                    MouseButton::Left => {
-                        if event.click_count == 2 {
-                            if state.is_viewport_fit() {
-                                state.zoom_around(event.position, 4.0);
-                            } else {
-                                state.fit_to_viewport();
-                            }
-                            cx.notify();
-                        } else if !state.is_dragging {
-                            state.start_drag_at(&event.position);
-                            cx.notify();
-                        }
-                    }
-                    MouseButton::Right => {}
-                    MouseButton::Middle => {}
-                    MouseButton::Navigate(_direction) => {}
-                });
-            }))
-            .on_mouse_up_out(
-                MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                    this.state.update(cx, |state, cx| {
-                        if state.stop_drag() {
-                            cx.notify();
-                        }
-                    });
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                    this.state.update(cx, |state, cx| {
-                        if state.stop_drag() {
-                            cx.notify();
-                        }
-                    });
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                this.state.update(cx, |state, cx| {
-                    if !event.dragging() || event.pressed_button != Some(MouseButton::Left) {
-                        if state.stop_drag() {
-                            cx.notify();
-                        }
-                        return;
-                    }
-
-                    let Some(drag_start_mouse) = state.drag_start_mouse else {
-                        return;
-                    };
-
-                    state.pan = state.drag_start_pan + (event.position - drag_start_mouse);
-                    cx.notify();
-                })
-            }))
-            .on_pinch(cx.listener(|this, event: &PinchEvent, _window, cx| {
-                let factor = (1.0 + event.delta).max(0.01);
-                this.state.update(cx, |state, cx| {
-                    state.zoom_around(event.position, factor);
-                    state.reanchor_drag(event.position);
-                    cx.notify();
-                });
-            }))
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                let delta = match event.delta {
-                    ScrollDelta::Pixels(delta) => delta,
-                    ScrollDelta::Lines(delta) => point(px(delta.x * 16.0), px(delta.y * 16.0)),
-                };
-
-                this.state.update(cx, |state, cx| {
-                    let factor = (delta.y.as_f32() * 0.0015).exp();
-                    state.zoom_around(event.position, factor);
-                    state.reanchor_drag(event.position);
-                    cx.notify();
-                });
-            }))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_pinch(cx.listener(Self::on_pinch))
+            .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(
                 canvas(
                     {
@@ -280,8 +312,8 @@ impl Render for ImageViewer {
                             let image_size = viewport_image_size(&image_render, window);
 
                             state.update(app, |state, cx| {
-                                state.update_viewport(bounds, image_size);
-                                if state.fit_once_to_viewport() {
+                                state.set_viewport_metrics(bounds, image_size);
+                                if !state.has_initial_fit && state.fit_to_viewport() {
                                     cx.on_next_frame(window, move |_, _, cx| {
                                         cx.notify();
                                     });
@@ -310,20 +342,22 @@ impl Render for ImageViewer {
                 )
                 .size_full(),
             )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(8.0))
-                    .bottom(px(8.0))
-                    .px(px(8.0))
-                    .py(px(4.0))
-                    .rounded_sm()
-                    .bg(colors.secondary.alpha(0.65))
-                    .border_1()
-                    .border_color(colors.border)
-                    .text_color(colors.primary)
-                    .text_xs()
-                    .child(zoom_label),
-            )
+            .when_some(zoom_label, move |el, zoom_label| {
+                el.child(
+                    div()
+                        .absolute()
+                        .left(px(8.0))
+                        .bottom(px(8.0))
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .rounded_sm()
+                        .bg(colors.secondary.alpha(0.65))
+                        .border_1()
+                        .border_color(colors.border)
+                        .text_color(colors.primary)
+                        .text_xs()
+                        .child(zoom_label),
+                )
+            })
     }
 }
