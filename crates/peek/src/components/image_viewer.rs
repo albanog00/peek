@@ -89,6 +89,14 @@ impl ImageViewerState {
         self.fit(self.viewport_size, self.image_size)
     }
 
+    fn is_viewport_fit(&mut self) -> bool {
+        let fit_zoom = (self.viewport_size.width.as_f32() / self.image_size.width.as_f32())
+            .min(self.viewport_size.height.as_f32() / self.image_size.height.as_f32())
+            .min(1.0)
+            .clamp(MIN_ZOOM, MAX_ZOOM);
+        fit_zoom == self.zoom
+    }
+
     fn start_drag_at(&mut self, position: &Point<Pixels>) {
         self.is_dragging = true;
         self.drag_start_mouse = Some(*position);
@@ -188,7 +196,12 @@ impl Render for ImageViewer {
             .on_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                 this.state.update(cx, |state, cx| match event.button {
                     MouseButton::Left => {
-                        if event.click_count == 2 && state.fit_to_viewport() {
+                        if event.click_count == 2 {
+                            if state.is_viewport_fit() {
+                                state.zoom_around(event.position, 4.0);
+                            } else {
+                                state.fit_to_viewport();
+                            }
                             cx.notify();
                         } else if !state.is_dragging {
                             state.start_drag_at(&event.position);
