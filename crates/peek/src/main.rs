@@ -26,7 +26,6 @@ impl Render for MainContent {
         div()
             .bg(colors.background)
             .size_full()
-            .p_2()
             .child(self.viewer.clone())
     }
 }

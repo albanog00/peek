@@ -251,13 +251,7 @@ impl Render for ImageViewer {
         let zoom_label = state.read(cx).zoom_label();
         let colors = cx.theme().colors;
 
-        let container = div()
-            .size_full()
-            .relative()
-            .border_2()
-            .border_color(colors.border)
-            .rounded_sm()
-            .overflow_hidden();
+        let container = div().size_full().relative().overflow_hidden();
 
         let Some(image) = self.image.clone() else {
             // No Image provided
