@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{ActiveTheme, IconName, Sizable, Size as ComponentSize, spinner::Spinner};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, spinner::Spinner};
 
 use crate::utils::ui::{scale_size, size_is_zero, viewport_image_size};
 
@@ -158,6 +158,14 @@ impl ImageViewer {
         }
     }
 
+    pub fn set_image(&mut self, image: Image, cx: &mut Context<'_, Self>) {
+        self.image = Some(Arc::new(image));
+        self.state.update(cx, |state, _cx| {
+            *state = ImageViewerState::new();
+        });
+        cx.notify();
+    }
+
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -255,14 +263,21 @@ impl Render for ImageViewer {
 
         let Some(image) = self.image.clone() else {
             // No Image provided
-            return container
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .text_color(colors.muted_foreground)
-                .child("Drop an image here!");
+            return div().size_full().p_2().child(
+                container
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .border_4()
+                    .border_dashed()
+                    .rounded_lg()
+                    .border_color(colors.border)
+                    .text_color(colors.muted_foreground)
+                    .child(Icon::new(IconName::Plus).with_size(px(48.0)))
+                    .child(div().child("Drop an image here!").text_xl()),
+            );
         };
 
         let Some(image_render) = image.use_render_image(window, cx) else {
@@ -276,11 +291,11 @@ impl Render for ImageViewer {
                 .text_color(colors.muted_foreground)
                 .child(
                     Spinner::new()
-                        .with_size(ComponentSize::Large)
+                        .with_size(px(48.0))
                         .color(colors.muted_foreground)
                         .icon(IconName::LoaderCircle),
                 )
-                .child(div().child("Loading image..."));
+                .child(div().child("Loading image...").text_xl());
         };
 
         let cursor = if self.state.read(cx).is_dragging {

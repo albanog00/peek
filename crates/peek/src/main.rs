@@ -26,6 +26,19 @@ impl Render for MainContent {
         div()
             .bg(colors.background)
             .size_full()
+            .can_drop(|_, _, _| true)
+            .on_drop(cx.listener(
+                |this, paths: &ExternalPaths, _window: &mut Window, cx: &mut Context<'_, Self>| {
+                    paths
+                        .paths()
+                        .first()
+                        .and_then(utils::fs::load_image_from_path)
+                        .map(move |image| {
+                            this.viewer
+                                .update(cx, |viewer, cx| viewer.set_image(image, cx))
+                        });
+                },
+            ))
             .child(self.viewer.clone())
     }
 }
