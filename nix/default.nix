@@ -7,6 +7,7 @@
   vulkan-headers,
   vulkan-loader,
   libGL,
+  mesa,
   # Window system
   libxkbcommon,
   wayland,
@@ -44,6 +45,7 @@
       vulkan-loader
       vulkan-headers
       libGL
+      mesa
 
       libxkbcommon
       wayland
