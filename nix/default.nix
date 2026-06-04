@@ -131,6 +131,7 @@ in
     commonArgs
     // {
       inherit cargoArtifacts;
+      doInstallCargoArtifacts = false;
 
       buildPhaseCargoCommand = ''
         cargo build --release --frozen --package peek
