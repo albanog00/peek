@@ -19,7 +19,6 @@
   fontconfig,
   freetype,
   atk,
-  gio-sharp,
   glib,
   gtk3,
   fd,
@@ -55,7 +54,6 @@
       libXi
       libXrandr
 
-      gio-sharp
       gtk3
       glib
       atk
