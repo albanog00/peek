@@ -31,7 +31,7 @@
     [
       pkg-config
     ]
-    ++ lib.optionals stdenv.isLinux [
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
       wrapGAppsHook3
     ];
 
@@ -40,7 +40,7 @@
       fontconfig
       freetype
     ]
-    ++ lib.optionals stdenv.isLinux [
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
       vulkan-loader
       vulkan-headers
       libGL
